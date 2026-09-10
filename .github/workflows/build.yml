@@ -1,4 +1,4 @@
-name: Build ADM Apps (Android & iOS)
+name: Build ADM Android APK
 
 on:
   push:
@@ -43,38 +43,4 @@ jobs:
         with:
           name: ADM-Android-Release-APK
           path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-
-  build-ios:
-    name: Build iOS App / IPA
-    runs-on: macos-14
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build iOS (No Codesign)
-        run: flutter build ios --release --no-codesign
-
-      - name: Package Unsigned IPA
-        run: |
-          cd build/ios/iphoneos
-          mkdir -p Payload
-          cp -r Runner.app Payload/
-          zip -r ../../../ADM-iOS-Unsigned.ipa Payload
-
-      - name: Upload iOS IPA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ADM-iOS-Unsigned-IPA
-          path: ADM-iOS-Unsigned.ipa
           if-no-files-found: error
