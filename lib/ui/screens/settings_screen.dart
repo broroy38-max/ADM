@@ -1,5 +1,5 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import '../../models/app_settings.dart';
 import '../../providers/settings_provider.dart';
@@ -239,15 +239,53 @@ class SettingsScreen extends StatelessWidget {
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () async {
-                            final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
-                            if (res != null && res.files.single.path != null) {
-                              final success = await BackupService.instance.importBackup(res.files.single.path!);
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text(success ? 'Backup restored!' : 'Failed to parse backup')),
-                                );
-                              }
+                            final backups = await BackupService.instance.getAvailableBackups();
+                            if (!context.mounted) return;
+                            if (backups.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('No backup files found yet. Export one first!')),
+                              );
+                              return;
                             }
+                            showDialog(
+                              context: context,
+                              builder: (ctx) {
+                                return AlertDialog(
+                                  backgroundColor: const Color(0xFF192231),
+                                  title: const Text('Select Backup to Restore'),
+                                  content: SizedBox(
+                                    width: double.maxFinite,
+                                    child: ListView.builder(
+                                      shrinkWrap: true,
+                                      itemCount: backups.length,
+                                      itemBuilder: (context, index) {
+                                        final b = backups[index];
+                                        return ListTile(
+                                          leading: const Icon(Icons.history_rounded, color: AppTheme.primaryCyan),
+                                          title: Text(p.basename(b.path), style: const TextStyle(fontSize: 12)),
+                                          subtitle: Text(
+                                            'Modified: ${b.lastModifiedSync().toString().substring(0, 16)}',
+                                            style: const TextStyle(fontSize: 10, color: Colors.white54),
+                                          ),
+                                          onTap: () async {
+                                            Navigator.pop(ctx);
+                                            final ok = await BackupService.instance.importBackup(b.path);
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text(ok ? 'Backup successfully restored!' : 'Failed to parse backup')),
+                                              );
+                                            }
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CANCEL')),
+                                  ],
+                                );
+                              },
+                            );
                           },
                           icon: const Icon(Icons.download_for_offline),
                           label: const Text('Restore Backup'),

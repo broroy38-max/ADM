@@ -76,4 +76,16 @@ class BackupService {
 
     return true;
   }
+
+  Future<List<File>> getAvailableBackups() async {
+    final docDir = await getApplicationDocumentsDirectory();
+    final backupDir = Directory(p.join(docDir.path, 'ADM_Backups'));
+    if (!await backupDir.exists()) return [];
+    final entities = backupDir.listSync();
+    return entities
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.json'))
+        .toList()
+      ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+  }
 }
