@@ -11,6 +11,8 @@ jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -38,9 +40,28 @@ jobs:
       - name: Build Android Release APK
         run: flutter build apk --release --no-tree-shake-icons
 
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/ADM-v1.0.1-release.apk
+
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ADM-Android-Release-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/ADM-v1.0.1-release.apk
           if-no-files-found: error
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.1
+          name: "ADM v1.0.1 Release"
+          body: |
+            ### ADM - Next-Gen Android Download Manager v1.0.1
+            
+            #### 🚀 Fixes & Improvements:
+            - **Fixed FileSystemException**: Resolved pending async I/O conflict by implementing atomic synchronous segment file writing and safe single-handle file streaming.
+            - **Link Sharing from Any App**: Added support for receiving download links via Android Share sheet (`ACTION_SEND`) and clicking URLs/magnet links directly (`ACTION_VIEW`).
+            - **Automatic Link Extraction**: Added regex pattern matching to clean surrounding text and trailing punctuation when sharing links from Chrome, YouTube, Telegram, or social media.
+            - **Auto Filename Detection**: Filename is now automatically extracted and decoded upon link receipt.
+          files: build/app/outputs/flutter-apk/ADM-v1.0.1-release.apk
