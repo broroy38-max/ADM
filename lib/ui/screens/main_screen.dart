@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../widgets/add_download_dialog.dart';
 import 'browser_screen.dart';
@@ -16,6 +17,55 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
+  static const _intentChannel = MethodChannel('com.devbox.adm/intent');
+  String? _lastHandledUrl;
+  DateTime? _lastHandledTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupIntentChannel();
+  }
+
+  void _setupIntentChannel() {
+    _intentChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onSharedUrl') {
+        final url = call.arguments as String?;
+        if (url != null && url.isNotEmpty) {
+          _triggerAddDownload(url);
+        }
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        final initialUrl = await _intentChannel.invokeMethod<String>('getInitialUrl');
+        if (initialUrl != null && initialUrl.isNotEmpty) {
+          _triggerAddDownload(initialUrl);
+        }
+      } catch (e) {
+        debugPrint('Failed to get initial intent URL: $e');
+      }
+    });
+  }
+
+  void _triggerAddDownload(String url) {
+    final now = DateTime.now();
+    if (_lastHandledUrl == url &&
+        _lastHandledTime != null &&
+        now.difference(_lastHandledTime!).inMilliseconds < 1500) {
+      return;
+    }
+    _lastHandledUrl = url;
+    _lastHandledTime = now;
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (_) => AddDownloadDialog(initialUrl: url),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

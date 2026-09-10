@@ -14,7 +14,7 @@ class ActiveDownloadHandle {
   final DownloadTask task;
   final HttpClient httpClient;
   final List<StreamSubscription> subscriptions = [];
-  final List<RandomAccessFile> fileHandles = [];
+  RandomAccessFile? fileHandle;
   bool isCancelled = false;
   Timer? speedTimer;
   int bytesSinceLastTick = 0;
@@ -29,13 +29,15 @@ class ActiveDownloadHandle {
     isCancelled = true;
     speedTimer?.cancel();
     for (final sub in subscriptions) {
-      sub.cancel();
-    }
-    for (final handle in fileHandles) {
       try {
-        handle.closeSync();
+        sub.cancel();
       } catch (_) {}
     }
+    subscriptions.clear();
+    try {
+      fileHandle?.closeSync();
+    } catch (_) {}
+    fileHandle = null;
     httpClient.close(force: true);
   }
 }
@@ -212,21 +214,30 @@ class MultiSegmentEngine {
     final task = handle.task;
     final file = File(task.savePath);
 
-    // If segments not initialized, create them
+    // If segments not initialized, create them and preallocate file
     if (task.segments.isEmpty) {
       task.segments = _calculateSegments(task.totalBytes, task.connections);
-      // Preallocate file
-      final raf = await file.open(mode: FileMode.writeOnly);
-      await raf.truncate(task.totalBytes);
-      await raf.close();
+      final initRaf = await file.open(mode: FileMode.write);
+      try {
+        await initRaf.truncate(task.totalBytes);
+      } finally {
+        await initRaf.close();
+      }
     } else {
       // Resuming existing segments
       if (!await file.exists()) {
-        final raf = await file.open(mode: FileMode.writeOnly);
-        await raf.truncate(task.totalBytes);
-        await raf.close();
+        final initRaf = await file.open(mode: FileMode.write);
+        try {
+          await initRaf.truncate(task.totalBytes);
+        } finally {
+          await initRaf.close();
+        }
       }
     }
+
+    // Open file in writeOnly mode (preserves preallocated size, allows arbitrary seeks)
+    final raf = await file.open(mode: FileMode.writeOnly);
+    handle.fileHandle = raf;
 
     task.status = DownloadStatus.downloading;
     _startSpeedMonitor(handle, onProgress);
@@ -286,13 +297,8 @@ class MultiSegmentEngine {
     void Function(dynamic error, int? statusCode) onSegmentError,
   ) async {
     final task = handle.task;
-    final file = File(task.savePath);
-    RandomAccessFile? raf;
 
     try {
-      raf = await file.open(mode: FileMode.writeOnlyAppend);
-      handle.fileHandles.add(raf);
-
       final currentOffset = segment.startByte + segment.downloadedBytes;
       if (currentOffset > segment.endByte) {
         segment.status = SegmentStatus.completed;
@@ -320,14 +326,16 @@ class MultiSegmentEngine {
       segment.status = SegmentStatus.downloading;
       int segmentOffset = currentOffset;
 
-      final fileHandle = raf;
       final subscription = resp.listen(
-        (chunk) async {
+        (chunk) {
           if (handle.isCancelled) return;
 
           try {
-            await fileHandle.setPosition(segmentOffset);
-            await fileHandle.writeFrom(chunk);
+            final fileHandle = handle.fileHandle;
+            if (fileHandle != null) {
+              fileHandle.setPositionSync(segmentOffset);
+              fileHandle.writeFromSync(chunk);
+            }
             segmentOffset += chunk.length;
             segment.downloadedBytes += chunk.length;
             task.downloadedBytes += chunk.length;
@@ -363,7 +371,6 @@ class MultiSegmentEngine {
   ) async {
     final task = handle.task;
     final file = File(task.savePath);
-    RandomAccessFile? raf;
 
     try {
       final uri = Uri.parse(task.url);
@@ -384,22 +391,24 @@ class MultiSegmentEngine {
       }
 
       final appendMode = (resp.statusCode == HttpStatus.partialContent);
-      raf = await file.open(mode: appendMode ? FileMode.append : FileMode.writeOnly);
-      handle.fileHandles.add(raf);
+      final raf = await file.open(mode: FileMode.writeOnly);
+      handle.fileHandle = raf;
 
-      if (!appendMode) {
+      if (appendMode) {
+        raf.setPositionSync(task.downloadedBytes);
+      } else {
         task.downloadedBytes = 0;
+        raf.truncateSync(0);
       }
 
       task.status = DownloadStatus.downloading;
       _startSpeedMonitor(handle, onProgress);
 
-      final fileHandle = raf;
       final subscription = resp.listen(
-        (chunk) async {
+        (chunk) {
           if (handle.isCancelled) return;
           try {
-            await fileHandle.writeFrom(chunk);
+            raf.writeFromSync(chunk);
             task.downloadedBytes += chunk.length;
             handle.bytesSinceLastTick += chunk.length;
           } catch (e) {
@@ -429,6 +438,7 @@ class MultiSegmentEngine {
 
   void _startSpeedMonitor(ActiveDownloadHandle handle, TaskProgressCallback onProgress) {
     handle.lastSpeedCheck = DateTime.now();
+    int tickCount = 0;
     handle.speedTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
       if (handle.isCancelled) return;
 
@@ -452,6 +462,11 @@ class MultiSegmentEngine {
           handle.task.etaSeconds = 0;
         }
 
+        tickCount++;
+        if (tickCount % 2 == 0) {
+          DatabaseService.instance.updateTask(handle.task);
+        }
+
         onProgress(handle.task);
       }
     });
@@ -464,6 +479,10 @@ class MultiSegmentEngine {
   ) async {
     final task = handle.task;
     _cleanupHandle(task.id);
+
+    if (task.totalBytes <= 0) {
+      task.totalBytes = task.downloadedBytes;
+    }
 
     task.status = DownloadStatus.completed;
     task.completedAt = DateTime.now();

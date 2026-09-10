@@ -31,6 +31,20 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
   void initState() {
     super.initState();
     _urlController = TextEditingController(text: widget.initialUrl ?? '');
+    if (widget.initialUrl != null && widget.initialUrl!.isNotEmpty) {
+      final uri = Uri.tryParse(widget.initialUrl!);
+      if (uri != null && uri.pathSegments.isNotEmpty) {
+        final lastSeg = uri.pathSegments.last.split('?').first;
+        if (lastSeg.isNotEmpty) {
+          try {
+            _filenameController.text = Uri.decodeComponent(lastSeg);
+          } catch (_) {
+            _filenameController.text = lastSeg;
+          }
+        }
+      }
+    }
+
     final settings = Provider.of<SettingsProvider>(context, listen: false).settings;
     _connections = settings.defaultConnections;
     _wifiOnly = settings.wifiOnly;
@@ -39,7 +53,14 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
       if (_filenameController.text.isEmpty && _urlController.text.isNotEmpty) {
         final uri = Uri.tryParse(_urlController.text);
         if (uri != null && uri.pathSegments.isNotEmpty) {
-          _filenameController.text = uri.pathSegments.last.split('?').first;
+          final lastSeg = uri.pathSegments.last.split('?').first;
+          if (lastSeg.isNotEmpty) {
+            try {
+              _filenameController.text = Uri.decodeComponent(lastSeg);
+            } catch (_) {
+              _filenameController.text = lastSeg;
+            }
+          }
         }
       }
     });
